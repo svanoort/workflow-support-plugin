@@ -25,14 +25,10 @@
 package org.jenkinsci.plugins.workflow.support;
 
 import com.thoughtworks.xstream.XStream;
-import hudson.util.XStream2;
 import org.apache.commons.pool2.BasePooledObjectFactory;
 import org.apache.commons.pool2.PooledObject;
 import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.apache.commons.pool2.impl.GenericObjectPool;
-import org.kohsuke.accmod.Restricted;
-import org.kohsuke.accmod.restrictions.NoExternalUse;
-
 import javax.annotation.Nonnull;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -40,80 +36,62 @@ import java.util.concurrent.ConcurrentHashMap;
  * Provides a basic pooling implementation for {@link XStream} instances, to avoid lock contention when instances are reused.
  * @author Sam Van Oort
  */
-@Restricted(NoExternalUse.class)
-public class XStreamPooler<PoolType extends XStreamPooled> {
+public final class XStreamPool<FactoryType extends XStreamFactory> {
 
-    static class PoolInstance extends GenericObjectPool<XStream> {
+    private PoolInstance wrappedPool;
+
+    private static class PoolInstance extends GenericObjectPool<XStream> {
         String key;
 
-        PoolInstance(BaseXStreamMaker factory) {
-            super(factory);
+        PoolInstance(XStreamFactory factory) {
+            super(new XStreamPoolFactoryShim(factory));
             this.key = factory.getFactoryKey();
         }
     }
 
-    PoolInstance myPool;
-
-    XStreamPooler(BaseXStreamMaker factory) {
-        myPool = new PoolInstance(factory);
+    private XStreamPool(XStreamFactory factory) {
+        wrappedPool = new PoolInstance(factory);
     }
 
-    /** Per-class pools */
-    static ConcurrentHashMap<String, XStreamPooler> pools = new ConcurrentHashMap<String, XStreamPooler>();
+    /** Pools keyed by the factory used via {@link XStreamFactory#getFactoryKey()}. */
+    static ConcurrentHashMap<String, XStreamPool> pools = new ConcurrentHashMap<String, XStreamPool>();
 
-    /** Used for classes that are {@link XStreamPooled} but not not {@link XStreamCustomizer}s. */
-    static XStreamPooler BASE_POOL = new XStreamPooler(new BaseXStreamMaker());
-
-    public static XStreamPooler poolForConsumer(@Nonnull XStreamPooled ob) {
-        if (ob instanceof XStreamCustomizer) {
-            XStreamCustomizer xc = (XStreamCustomizer)ob;
-            String key = xc.getXStreamFactory().getFactoryKey();
-            XStreamPooler pool = pools.computeIfAbsent(key, k -> new XStreamPooler(new CustomizedXStreamMaker(xc.getXStreamFactory())));
-            return pool;
-        }
-        return BASE_POOL;
+    /** Key method: find (and if needed, create) a pool for the given factory type.
+     *  This pool can then be used with {@link #borrowXStream(XStreamFactory)} and {@link #returnXStream(XStream, XStreamFactory)}
+     *  to take advantage of pooling.
+     */
+    public static XStreamPool poolForConsumer(@Nonnull XStreamFactory fac) {
+        String key = fac.getFactoryKey();
+        XStreamPool pool = pools.computeIfAbsent(key, k -> new XStreamPool(fac));
+        return pool;
     }
 
-    public void clearPools() {
-        BASE_POOL.clearPools();
-        for (XStreamPooler pool : pools.values()) {
+    /** Empties pools of all their instances. */
+    public static void clearPools() {
+        for (XStreamPool pool : pools.values()) {
             pool.clearPools();
         }
     }
 
-    public XStream borrowXStream(@Nonnull PoolType consumer) {
+    /** Obtain an {@link XStream} instance from the pool for this type. */
+    public XStream borrowXStream(@Nonnull FactoryType consumer) {
         try {
-            return myPool.borrowObject();
+            return wrappedPool.borrowObject();
         } catch (Exception ex) {
             throw new RuntimeException(ex);
         }
     }
 
-    public void returnXStream(@Nonnull XStream pooledInstance, @Nonnull PoolType consumer) {
-        myPool.returnObject(pooledInstance);
+    /** Return an {@link XStream} instance to the pool. */
+    public void returnXStream(@Nonnull XStream pooledInstance, @Nonnull FactoryType consumer) {
+        wrappedPool.returnObject(pooledInstance);
     }
 
-    static class BaseXStreamMaker extends BasePooledObjectFactory<XStream> {
-
-        public String getFactoryKey() {
-            return "";
-        }
-
-        @Override
-        public XStream create() throws Exception {
-            return new XStream2();
-        }
-
-        @Override
-        public PooledObject<XStream> wrap(XStream xStream) {
-            return new DefaultPooledObject<XStream> (xStream);
-        }
-    }
-
-    static class CustomizedXStreamMaker extends BaseXStreamMaker {
+    /** Wraps an {@link XStreamFactory} so you can use it as a {@link org.apache.commons.pool2.PooledObjectFactory}. */
+    private static class XStreamPoolFactoryShim extends BasePooledObjectFactory<XStream> {
         XStreamFactory myCustomFactory;
 
-        CustomizedXStreamMaker(@Nonnull XStreamFactory newFactory) {
+        XStreamPoolFactoryShim(@Nonnull XStreamFactory newFactory) {
             this.myCustomFactory = newFactory;
         }
 
@@ -121,9 +99,12 @@ public class XStreamPooler<PoolType extends XStreamPooled> {
             return myCustomFactory.getFactoryKey();
         }
 
-        @Override
         public XStream create() throws Exception {
             return myCustomFactory.createXStream();
+        }
+
+        public PooledObject<XStream> wrap(XStream xStream) {
+            return new DefaultPooledObject<XStream> (xStream);
         }
     }
 

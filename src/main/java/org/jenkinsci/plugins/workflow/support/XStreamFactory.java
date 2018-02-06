@@ -29,18 +29,31 @@ import hudson.util.XStream2;
 
 import javax.annotation.Nonnull;
 
-/** Classes that implement this can produce their own configured XStream instances and support pooling of instances to
- *  prevent threads blocking due to internal synchronization when XStream instances are reused. */
+/**
+ * Implement this and your class can now use the {@link XStreamPool} to use pooled {@link XStream} instances, to avoid
+ *  thread contention when multiple threads try to reuse an instance.
+ *
+ * <strong>Implementation note:</strong> If you customize instances, i.e. by registering {@link com.thoughtworks.xstream.converters.Converter}s
+ *  or aliases you <strong>MUST</strong> override <strong>BOTH</strong> {@link #createXStream()} AND {@link #getFactoryKey()}.
+ *
+ *  <p> See their JavaDocs for what is needed.
+ */
 public interface XStreamFactory {
+
+    /** Provides an {@link XStream} instance, customized if needed for this class, such as with converters or aliases.
+     *  If you override this method you <strong>MUST</strong> provide a new key for {@link #getFactoryKey()}.
+     */
     @Nonnull
     public default XStream createXStream() {
         return new XStream2();
     }
 
-    /** Returns a key that uniquely identifies how XStream instances are configured.
-     *  Generally the class name itself will be fine, unless you want to share instances with non-inheriting classes. */
+    /** Returns a key unique to the configuration of {@link XStream} instances returned by {@link #createXStream()}.
+     *  If you are overriding {@link #createXStream()}, then you need a unique key.
+     *
+     *  <p>Generally <code>getClass().getName()</code> is fine unless you want to share XStream instances with non-inheriting classes. */
     @Nonnull
     public default String getFactoryKey() {
-        return this.getClass().getName();
+        return "BASE";
     }
 }
