@@ -28,7 +28,7 @@ import javax.annotation.Nonnull;
 /**
  * Implement this and your class can use {@link XStreamPool} to pool and reuse {@link com.thoughtworks.xstream.XStream} instances.
  *
- * <p><strong>Customization of XStream:</strong> if you need customized XStream instances, you can return a customized static {@link XStreamFactory
+ * <p><strong>Customization of XStream:</strong> if you need customized XStream instances, you can return a customized static {@link XStreamFactory}
  *  instance that registers converters, aliases, etc.
  *
  * <p><strong>Implementation note: {@link XStreamPooled} classes MUST define and return static {@link XStreamFactory} instances for pooling to work.</strong>

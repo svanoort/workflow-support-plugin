@@ -25,10 +25,17 @@
 package org.jenkinsci.plugins.workflow.support;
 
 import com.thoughtworks.xstream.XStream;
+import hudson.Extension;
+import hudson.init.Terminator;
+import jenkins.model.Jenkins;
 import org.apache.commons.pool2.BasePooledObjectFactory;
 import org.apache.commons.pool2.PooledObject;
 import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.apache.commons.pool2.impl.GenericObjectPool;
+import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
+
 import javax.annotation.Nonnull;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -36,47 +43,61 @@ import java.util.concurrent.ConcurrentHashMap;
  * Provides a basic pooling implementation for {@link XStream} instances, to avoid lock contention when instances are reused.
  * @author Sam Van Oort
  */
-public final class XStreamPool<FactoryType extends XStreamFactory> {
+@Extension
+public final class XStreamPool {
 
-    private PoolInstance wrappedPool;
+    @Restricted(NoExternalUse.class)
+    public XStreamPool(){
 
-    private static class PoolInstance extends GenericObjectPool<XStream> {
+    }
+
+    static class PoolInstance extends GenericObjectPool<XStream> {  // Not private so we can touch it for testing
 
         PoolInstance(XStreamFactory factory) {
             super(new XStreamPoolFactoryShim(factory));
+            GenericObjectPoolConfig config = new GenericObjectPoolConfig();
+            config.setMaxTotal(-1); // Handle unlimited scaling
+            config.setMinIdle(1);
+            config.setMaxIdle(-1);
+            config.setBlockWhenExhausted(true);
+            config.setMaxWaitMillis(1000L);
+            config.setMinEvictableIdleTimeMillis(30000);
+            this.setConfig(config);
         }
     }
 
-    private XStreamPool(XStreamFactory factory) {
-        wrappedPool = new PoolInstance(factory);
-    }
-
-    private static ConcurrentHashMap<XStreamFactory, XStreamPool> pools = new ConcurrentHashMap<XStreamFactory, XStreamPool>();
+    ConcurrentHashMap<XStreamFactory, PoolInstance> pools = new ConcurrentHashMap<XStreamFactory, PoolInstance>();
 
     /** Obtain an {@link XStream} instance from the pools for this poolable type. */
-    public static XStream borrowXStream(@Nonnull XStreamPooled consumer) {
+    public XStream borrowXStream(@Nonnull XStreamPooled consumer) {
         try {
-            return poolForConsumer(consumer).wrappedPool.borrowObject();
+            return poolForConsumer(consumer).borrowObject();
         } catch (Exception ex) {
             throw new RuntimeException(ex);
         }
     }
 
     /** Return an {@link XStream} instance to the pool. */
-    public static void returnXStream(@Nonnull XStream pooledInstance, @Nonnull XStreamPooled consumer) {
-        poolForConsumer(consumer).wrappedPool.returnObject(pooledInstance);
+    public void returnXStream(@Nonnull XStream pooledInstance, @Nonnull XStreamPooled consumer) {
+        poolForConsumer(consumer).returnObject(pooledInstance);
     }
 
     /** Empties pools of all their instances. */
-    public static void clearPools() {
-        for (XStreamPool pool : pools.values()) {
-            pool.clearPools();
+    public void clearPools() {
+        for (PoolInstance pool : pools.values()) {
+            pool.clear();
         }
     }
 
-    private static XStreamPool poolForConsumer(@Nonnull XStreamPooled consumer) {
+    /** Return the instance */
+    @Nonnull
+    public static XStreamPool get() {
+        return Jenkins.getActiveInstance().getExtensionList(XStreamPool.class).get(0);
+    }
+
+    private PoolInstance poolForConsumer(@Nonnull XStreamPooled consumer) {
         XStreamFactory factoryInstance = consumer.getFactory();
-        XStreamPool pool = pools.computeIfAbsent(factoryInstance, k -> new XStreamPool(factoryInstance));
+        PoolInstance pool = pools.computeIfAbsent(factoryInstance, k -> new PoolInstance(factoryInstance));
         return pool;
     }
 
@@ -94,6 +115,19 @@ public final class XStreamPool<FactoryType extends XStreamFactory> {
 
         public PooledObject<XStream> wrap(XStream xStream) {
             return new DefaultPooledObject<XStream> (xStream);
+        }
+    }
+
+    @Terminator
+    public void shutdown() {
+        for (PoolInstance pool : pools.values()) {
+            if (!pool.isClosed()) {
+                try {
+                    pool.close();
+                } catch (Exception ex) {
+                    // Who cares?
+                }
+            }
         }
     }
 

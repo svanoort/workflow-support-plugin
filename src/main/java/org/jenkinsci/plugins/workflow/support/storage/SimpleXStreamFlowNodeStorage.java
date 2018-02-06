@@ -246,8 +246,6 @@ public class SimpleXStreamFlowNodeStorage extends FlowNodeStorage implements XSt
         }
     }
 
-    public static final XStream2 XSTREAM = new XStream2();
-
     private static final Field FlowNode$exec;
     private static final Field FlowNode$parents;
     private static final Field FlowNode$parentIds;
@@ -306,6 +304,8 @@ public class SimpleXStreamFlowNodeStorage extends FlowNodeStorage implements XSt
             return XSTREAM;
         }
     };
+
+    private static final XStream2 XSTREAM = (XStream2)(XSTREAM_FACTORY.createXStream());
 
     public XStreamFactory getFactory() {
         return XSTREAM_FACTORY;

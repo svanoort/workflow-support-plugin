@@ -91,11 +91,14 @@ public class BulkFlowNodeStorage extends FlowNodeStorage implements XStreamPoole
                 File storeFile = getStoreFile();
                 if (storeFile.exists()) {
                     HashMap<String, Tag> roughNodes = null;
+                    XStream2 stream = (XStream2)(XStreamPool.get().borrowXStream(this));
                     try {
-                        roughNodes = (HashMap<String, Tag>) (((XStream2)(XStreamPool.borrowXStream(this))).fromXML(getStoreFile()));
+                        roughNodes = (HashMap<String, Tag>)(stream.fromXML(getStoreFile()));
                     } catch (Exception ex) {
                        nodes = new HashMap<String, Tag>();
                        throw new IOException("Failed to read nodes", ex);
+                    } finally {
+//                        XStreamPool.returnXStream(stream, this);
                     }
                     if (roughNodes == null) {
                         nodes = new HashMap<String, Tag>();
@@ -169,7 +172,12 @@ public class BulkFlowNodeStorage extends FlowNodeStorage implements XStreamPoole
             if (!dir.exists()) {
                 IOUtils.mkdirs(dir);
             }
-            PipelineIOUtils.writeByXStream(nodes, getStoreFile(), (XStream2)(XStreamPool.borrowXStream(this)), !this.isAvoidAtomicWrite());
+            XStream2 stream = (XStream2)(XStreamPool.get().borrowXStream(this));
+            try {
+                PipelineIOUtils.writeByXStream(nodes, getStoreFile(), stream, !this.isAvoidAtomicWrite());
+            } finally {
+//                XStreamPool.returnXStream(stream, this);
+            }
             isModified = false;
         }
     }
