@@ -27,6 +27,7 @@ package org.jenkinsci.plugins.workflow.support.storage;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import com.thoughtworks.xstream.XStream;
 import com.thoughtworks.xstream.converters.Converter;
 import com.thoughtworks.xstream.converters.MarshallingContext;
 import com.thoughtworks.xstream.converters.UnmarshallingContext;
@@ -42,6 +43,8 @@ import hudson.model.Action;
 import hudson.util.RobustReflectionConverter;
 import hudson.util.XStream2;
 import org.jenkinsci.plugins.workflow.support.PipelineIOUtils;
+import org.jenkinsci.plugins.workflow.support.XStreamFactory;
+import org.jenkinsci.plugins.workflow.support.XStreamPooled;
 
 import java.io.File;
 import java.io.IOException;
@@ -68,7 +71,7 @@ import javax.annotation.Nonnull;
  *
  * @author Kohsuke Kawaguchi
  */
-public class SimpleXStreamFlowNodeStorage extends FlowNodeStorage {
+public class SimpleXStreamFlowNodeStorage extends FlowNodeStorage implements XStreamPooled {
     private final File dir;
     private final FlowExecution exec;
     private final LoadingCache<String,FlowNode> nodeCache = CacheBuilder.newBuilder().softValues().build(new CacheLoader<String,FlowNode>() {
@@ -250,54 +253,65 @@ public class SimpleXStreamFlowNodeStorage extends FlowNodeStorage {
     private static final Field FlowNode$parentIds;
     private static final Method FlowNode_setActions;
 
-    static {
-        XSTREAM.registerConverter(new Converter() {
-            private final RobustReflectionConverter ref = new RobustReflectionConverter(XSTREAM.getMapper(), JVM.newReflectionProvider());
-            // IdentityHashMap could leak memory. WeakHashMap compares by equals, which will fail with NPE in FlowNode.hashCode.
-            private final Map<FlowNode,String> ids = CacheBuilder.newBuilder().weakKeys().<FlowNode,String>build().asMap();
-            @Override public boolean canConvert(Class type) {
-                return FlowNode.class.isAssignableFrom(type);
-            }
-            @Override public void marshal(Object source, HierarchicalStreamWriter writer, MarshallingContext context) {
-                ref.marshal(source, writer, context);
-            }
-            @Override public Object unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
-                try {
-                    FlowNode n = (FlowNode) ref.unmarshal(reader, context);
-                    ids.put(n, reader.getValue());
-                    try {
-                        @SuppressWarnings("unchecked") List<FlowNode> parents = (List<FlowNode>) FlowNode$parents.get(n);
-                        if (parents != null) {
-                            @SuppressWarnings("unchecked") List<String> parentIds = (List<String>) FlowNode$parentIds.get(n);
-                            assert parentIds == null;
-                            parentIds = new ArrayList<String>(parents.size());
-                            for (FlowNode parent : parents) {
-                                String id = ids.get(parent);
-                                assert id != null;
-                                parentIds.add(id);
-                            }
-                            FlowNode$parents.set(n, null);
-                            FlowNode$parentIds.set(n, parentIds);
-                        }
-                    } catch (Exception x) {
-                        assert false : x;
-                    }
-                    return n;
-                } catch (RuntimeException x) {
-                    x.printStackTrace();
-                    throw x;
+    private static XStreamFactory XSTREAM_FACTORY = new XStreamFactory() {
+        public XStream createXStream() {
+            XStream2 XSTREAM = new XStream2();
+
+            XSTREAM.registerConverter(new Converter() {
+                private final RobustReflectionConverter ref = new RobustReflectionConverter(XSTREAM.getMapper(), JVM.newReflectionProvider());
+                // IdentityHashMap could leak memory. WeakHashMap compares by equals, which will fail with NPE in FlowNode.hashCode.
+                private final Map<FlowNode,String> ids = CacheBuilder.newBuilder().weakKeys().<FlowNode,String>build().asMap();
+                @Override public boolean canConvert(Class type) {
+                    return FlowNode.class.isAssignableFrom(type);
                 }
-            }
-        });
+                @Override public void marshal(Object source, HierarchicalStreamWriter writer, MarshallingContext context) {
+                    ref.marshal(source, writer, context);
+                }
+                @Override public Object unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
+                    try {
+                        FlowNode n = (FlowNode) ref.unmarshal(reader, context);
+                        ids.put(n, reader.getValue());
+                        try {
+                            @SuppressWarnings("unchecked") List<FlowNode> parents = (List<FlowNode>) FlowNode$parents.get(n);
+                            if (parents != null) {
+                                @SuppressWarnings("unchecked") List<String> parentIds = (List<String>) FlowNode$parentIds.get(n);
+                                assert parentIds == null;
+                                parentIds = new ArrayList<String>(parents.size());
+                                for (FlowNode parent : parents) {
+                                    String id = ids.get(parent);
+                                    assert id != null;
+                                    parentIds.add(id);
+                                }
+                                FlowNode$parents.set(n, null);
+                                FlowNode$parentIds.set(n, parentIds);
+                            }
+                        } catch (Exception x) {
+                            assert false : x;
+                        }
+                        return n;
+                    } catch (RuntimeException x) {
+                        x.printStackTrace();
+                        throw x;
+                    }
+                }
+            });
 
-        // Aliases reduce the amount of data persisted to disk
-        XSTREAM.alias("Tag", Tag.class);
-        // Maybe alias for UninstantiatedDescribable too, if we add a structs dependency
-        XSTREAM.aliasPackage("cps.n", "org.jenkinsci.plugins.workflow.cps.nodes");
-        XSTREAM.aliasPackage("wf.a", "org.jenkinsci.plugins.workflow.actions");
-        XSTREAM.aliasPackage("s.a", "org.jenkinsci.plugins.workflow.support.actions");
-        XSTREAM.aliasPackage("cps.a", "org.jenkinsci.plugins.workflow.cps.actions");
+            // Aliases reduce the amount of data persisted to disk
+            XSTREAM.alias("Tag", Tag.class);
+            // Maybe alias for UninstantiatedDescribable too, if we add a structs dependency
+            XSTREAM.aliasPackage("cps.n", "org.jenkinsci.plugins.workflow.cps.nodes");
+            XSTREAM.aliasPackage("wf.a", "org.jenkinsci.plugins.workflow.actions");
+            XSTREAM.aliasPackage("s.a", "org.jenkinsci.plugins.workflow.support.actions");
+            XSTREAM.aliasPackage("cps.a", "org.jenkinsci.plugins.workflow.cps.actions");
+            return XSTREAM;
+        }
+    };
 
+    public XStreamFactory getFactory() {
+        return XSTREAM_FACTORY;
+    }
+
+    static {
         try {
             // TODO ugly, but we do not want public getters and setters for internal state.
             // Really FlowNode ought to have been an interface and the concrete implementations defined here, by the storage.

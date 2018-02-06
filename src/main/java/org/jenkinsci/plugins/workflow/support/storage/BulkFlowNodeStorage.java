@@ -24,6 +24,7 @@
 
 package org.jenkinsci.plugins.workflow.support.storage;
 
+import com.thoughtworks.xstream.XStream;
 import hudson.Util;
 import hudson.model.Action;
 import hudson.util.IOUtils;
@@ -33,6 +34,9 @@ import org.jenkinsci.plugins.workflow.flow.FlowExecution;
 import org.jenkinsci.plugins.workflow.graph.FlowNode;
 import org.jenkinsci.plugins.workflow.flow.FlowDurabilityHint;
 import org.jenkinsci.plugins.workflow.support.PipelineIOUtils;
+import org.jenkinsci.plugins.workflow.support.XStreamFactory;
+import org.jenkinsci.plugins.workflow.support.XStreamPool;
+import org.jenkinsci.plugins.workflow.support.XStreamPooled;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
@@ -58,7 +62,7 @@ import java.util.List;
  * For these reasons, this implementation should <strong>only</strong> be used where {@link FlowDurabilityHint#isPersistWithEveryStep()}
  * is <strong>false</strong>.
  */
-public class BulkFlowNodeStorage extends FlowNodeStorage {
+public class BulkFlowNodeStorage extends FlowNodeStorage implements XStreamPooled {
     private final File dir;
 
     private final FlowExecution exec;
@@ -88,7 +92,7 @@ public class BulkFlowNodeStorage extends FlowNodeStorage {
                 if (storeFile.exists()) {
                     HashMap<String, Tag> roughNodes = null;
                     try {
-                        roughNodes = (HashMap<String, Tag>) (XSTREAM.fromXML(getStoreFile()));
+                        roughNodes = (HashMap<String, Tag>) (((XStream2)(XStreamPool.borrowXStream(this))).fromXML(getStoreFile()));
                     } catch (Exception ex) {
                        nodes = new HashMap<String, Tag>();
                        throw new IOException("Failed to read nodes", ex);
@@ -165,8 +169,7 @@ public class BulkFlowNodeStorage extends FlowNodeStorage {
             if (!dir.exists()) {
                 IOUtils.mkdirs(dir);
             }
-            PipelineIOUtils.writeByXStream(nodes, getStoreFile(), XSTREAM, !this.isAvoidAtomicWrite());
-
+            PipelineIOUtils.writeByXStream(nodes, getStoreFile(), (XStream2)(XStreamPool.borrowXStream(this)), !this.isAvoidAtomicWrite());
             isModified = false;
         }
     }
@@ -223,19 +226,29 @@ public class BulkFlowNodeStorage extends FlowNodeStorage {
         }
     }
 
-    public static final XStream2 XSTREAM = new XStream2();
+    private static XStreamFactory XSTREAM_FACTORY = new XStreamFactory() {
+        public XStream createXStream() {
+            XStream2 out = new XStream2();
+            // Aliases reduce the amount of data persisted to disk
+            out.alias("Tag", Tag.class);
+            // Maybe alias for UninstantiatedDescribable too, if we add a structs dependency
+            out.aliasPackage("cps.n", "org.jenkinsci.plugins.workflow.cps.nodes");
+            out.aliasPackage("wf.a", "org.jenkinsci.plugins.workflow.actions");
+            out.aliasPackage("s.a", "org.jenkinsci.plugins.workflow.support.actions");
+            out.aliasPackage("cps.a", "org.jenkinsci.plugins.workflow.cps.actions");
+
+            return out;
+        }
+    };
+
+    public XStreamFactory getFactory() {
+        return XSTREAM_FACTORY;
+    }
 
     private static final Field FlowNode$exec;
     private static final Method FlowNode_setActions;
 
     static {
-        // Aliases reduce the amount of data persisted to disk
-        XSTREAM.alias("Tag", Tag.class);
-        // Maybe alias for UninstantiatedDescribable too, if we add a structs dependency
-        XSTREAM.aliasPackage("cps.n", "org.jenkinsci.plugins.workflow.cps.nodes");
-        XSTREAM.aliasPackage("wf.a", "org.jenkinsci.plugins.workflow.actions");
-        XSTREAM.aliasPackage("s.a", "org.jenkinsci.plugins.workflow.support.actions");
-        XSTREAM.aliasPackage("cps.a", "org.jenkinsci.plugins.workflow.cps.actions");
         try {
             // Ugly, but we do not want public getters and setters for internal state on FlowNodes.
             FlowNode$exec = FlowNode.class.getDeclaredField("exec");
