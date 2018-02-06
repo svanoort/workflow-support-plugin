@@ -41,11 +41,9 @@ public final class XStreamPool<FactoryType extends XStreamFactory> {
     private PoolInstance wrappedPool;
 
     private static class PoolInstance extends GenericObjectPool<XStream> {
-        String key;
 
         PoolInstance(XStreamFactory factory) {
             super(new XStreamPoolFactoryShim(factory));
-            this.key = factory.getFactoryKey();
         }
     }
 
@@ -53,17 +51,20 @@ public final class XStreamPool<FactoryType extends XStreamFactory> {
         wrappedPool = new PoolInstance(factory);
     }
 
-    /** Pools keyed by the factory used via {@link XStreamFactory#getFactoryKey()}. */
-    static ConcurrentHashMap<String, XStreamPool> pools = new ConcurrentHashMap<String, XStreamPool>();
+    private static ConcurrentHashMap<XStreamFactory, XStreamPool> pools = new ConcurrentHashMap<XStreamFactory, XStreamPool>();
 
-    /** Key method: find (and if needed, create) a pool for the given factory type.
-     *  This pool can then be used with {@link #borrowXStream(XStreamFactory)} and {@link #returnXStream(XStream, XStreamFactory)}
-     *  to take advantage of pooling.
-     */
-    public static XStreamPool poolForConsumer(@Nonnull XStreamFactory fac) {
-        String key = fac.getFactoryKey();
-        XStreamPool pool = pools.computeIfAbsent(key, k -> new XStreamPool(fac));
-        return pool;
+    /** Obtain an {@link XStream} instance from the pools for this poolable type. */
+    public static XStream borrowXStream(@Nonnull XStreamPooled consumer) {
+        try {
+            return poolForConsumer(consumer).wrappedPool.borrowObject();
+        } catch (Exception ex) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    /** Return an {@link XStream} instance to the pool. */
+    public static void returnXStream(@Nonnull XStream pooledInstance, @Nonnull XStreamPooled consumer) {
+        poolForConsumer(consumer).wrappedPool.returnObject(pooledInstance);
     }
 
     /** Empties pools of all their instances. */
@@ -73,18 +74,10 @@ public final class XStreamPool<FactoryType extends XStreamFactory> {
         }
     }
 
-    /** Obtain an {@link XStream} instance from the pool for this type. */
-    public XStream borrowXStream(@Nonnull FactoryType consumer) {
-        try {
-            return wrappedPool.borrowObject();
-        } catch (Exception ex) {
-            throw new RuntimeException(ex);
-        }
-    }
-
-    /** Return an {@link XStream} instance to the pool. */
-    public void returnXStream(@Nonnull XStream pooledInstance, @Nonnull FactoryType consumer) {
-        wrappedPool.returnObject(pooledInstance);
+    private static XStreamPool poolForConsumer(@Nonnull XStreamPooled consumer) {
+        XStreamFactory factoryInstance = consumer.getFactory();
+        XStreamPool pool = pools.computeIfAbsent(factoryInstance, k -> new XStreamPool(factoryInstance));
+        return pool;
     }
 
     /** Wraps an {@link XStreamFactory} so you can use it as a {@link org.apache.commons.pool2.PooledObjectFactory}. */
@@ -93,10 +86,6 @@ public final class XStreamPool<FactoryType extends XStreamFactory> {
 
         XStreamPoolFactoryShim(@Nonnull XStreamFactory newFactory) {
             this.myCustomFactory = newFactory;
-        }
-
-        public String getFactoryKey() {
-            return myCustomFactory.getFactoryKey();
         }
 
         public XStream create() throws Exception {

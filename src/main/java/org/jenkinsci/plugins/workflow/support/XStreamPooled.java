@@ -21,36 +21,32 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
 package org.jenkinsci.plugins.workflow.support;
-
-import com.thoughtworks.xstream.XStream;
-import hudson.util.XStream2;
 
 import javax.annotation.Nonnull;
 
 /**
- * Provides customized {@link XStream} instances that are pooled and reused for {@link XStreamPooled} classes.
- * <p><strong>Implementation note:</strong> instances are retained long-term by pools, so they should be lightweight.
+ * Implement this and your class can use {@link XStreamPool} to pool and reuse {@link com.thoughtworks.xstream.XStream} instances.
+ *
+ * <p><strong>Customization of XStream:</strong> if you need customized XStream instances, you can return a customized static {@link XStreamFactory
+ *  instance that registers converters, aliases, etc.
+ *
+ * <p><strong>Implementation note: {@link XStreamPooled} classes MUST define and return static {@link XStreamFactory} instances for pooling to work.</strong>
+ * This is because pooling is defined per factory instance, with <em>direct equality comparison</em> for safety.
+ *
+ * <p>If (for some crazy reason) you want to use the same {@link XStreamFactory} in an unrelated class, you can just forward the {@link #getFactory()} call.
+ *
+ * @author Sam Van Oort
  */
-public class XStreamFactory {
+public interface XStreamPooled {
+    /** Static base implementation used when we don't customize the XStream serialization. */
+    XStreamFactory BASE_FACTORY = new XStreamFactory();
 
-    /** Provides an {@link XStream} instance, customized if needed for this class, such as with converters or aliases.
+    /** Returns the factory for this type, which <strong>MUST</strong> be safe to retain in-memory long-term.
+     *  In most cases this means providing a lightweight static implementation.
      */
     @Nonnull
-    public XStream createXStream() {
-        return new XStream2();
-    }
-
-    @Override
-    public final int hashCode() {
-        // Ensures you can't override the default identity hashcode
-        return super.hashCode();
-    }
-
-    @Override
-    public final boolean equals(Object ob) {
-        // Ensures we can't break the default equality check, which is object identity
-        return super.equals(ob);
+    public default XStreamFactory getFactory() {
+        return BASE_FACTORY;
     }
 }
