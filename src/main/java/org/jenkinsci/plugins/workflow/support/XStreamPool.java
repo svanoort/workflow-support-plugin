@@ -30,6 +30,7 @@ import hudson.init.Terminator;
 import jenkins.model.Jenkins;
 import org.apache.commons.pool2.BasePooledObjectFactory;
 import org.apache.commons.pool2.PooledObject;
+import org.apache.commons.pool2.impl.AbandonedConfig;
 import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
@@ -38,6 +39,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 import javax.annotation.Nonnull;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Provides a basic pooling implementation for {@link XStream} instances, to avoid lock contention when instances are reused.
@@ -46,23 +50,44 @@ import java.util.concurrent.ConcurrentHashMap;
 @Extension
 public final class XStreamPool {
 
+    static Logger LOGGER = Logger.getLogger(XStreamPool.class.getName());
+
+    static GenericObjectPoolConfig BASE_CONFIG = new GenericObjectPoolConfig();
+
+    static final AbandonedConfig ABANDONED_CONFIG = new AbandonedConfig();
+
+    static final long EVICTION_RUN__MILLIS = TimeUnit.MILLISECONDS.convert(1, TimeUnit.MINUTES);;
+    static final long EVICTION_IDLE_MILLIS = TimeUnit.MILLISECONDS.convert(10, TimeUnit.MINUTES);
+    static final long ABANDONED_TIMEOUT = TimeUnit.MILLISECONDS.convert(1, TimeUnit.MINUTES);
+
+    static {
+        BASE_CONFIG.setMaxTotal(-1); // Handle unlimited scaling
+        BASE_CONFIG.setMinIdle(-1);
+        BASE_CONFIG.setMaxIdle(-1);
+        BASE_CONFIG.setBlockWhenExhausted(true);
+        BASE_CONFIG.setMaxWaitMillis(1000L);
+        BASE_CONFIG.setMinEvictableIdleTimeMillis(EVICTION_IDLE_MILLIS);
+        BASE_CONFIG.setTimeBetweenEvictionRunsMillis(EVICTION_RUN__MILLIS);
+        BASE_CONFIG.setJmxEnabled(false);
+
+        ABANDONED_CONFIG.setLogAbandoned(false);
+        ABANDONED_CONFIG.setRemoveAbandonedTimeout((int)ABANDONED_TIMEOUT);
+        ABANDONED_CONFIG.setRemoveAbandonedOnMaintenance(true);
+        ABANDONED_CONFIG.setUseUsageTracking(false);  // May wish to re-enable later for diagnostics of pool leaks
+    }
+
+
+
     @Restricted(NoExternalUse.class)
     public XStreamPool(){
 
     }
 
+
     static class PoolInstance extends GenericObjectPool<XStream> {  // Not private so we can touch it for testing
 
-        PoolInstance(XStreamFactory factory) {
-            super(new XStreamPoolFactoryShim(factory));
-            GenericObjectPoolConfig config = new GenericObjectPoolConfig();
-            config.setMaxTotal(-1); // Handle unlimited scaling
-            config.setMinIdle(1);
-            config.setMaxIdle(-1);
-            config.setBlockWhenExhausted(true);
-            config.setMaxWaitMillis(1000L);
-            config.setMinEvictableIdleTimeMillis(30000);
-            this.setConfig(config);
+        PoolInstance(@Nonnull XStreamFactory factory) {
+            super(new XStreamPoolFactoryShim(factory), BASE_CONFIG, ABANDONED_CONFIG);
         }
     }
 
@@ -73,6 +98,7 @@ public final class XStreamPool {
         try {
             return poolForConsumer(consumer).borrowObject();
         } catch (Exception ex) {
+            LOGGER.log(Level.SEVERE, "Error obtaining XStream instance", ex);
             throw new RuntimeException(ex);
         }
     }
@@ -95,7 +121,7 @@ public final class XStreamPool {
         return Jenkins.getActiveInstance().getExtensionList(XStreamPool.class).get(0);
     }
 
-    private PoolInstance poolForConsumer(@Nonnull XStreamPooled consumer) {
+    PoolInstance poolForConsumer(@Nonnull XStreamPooled consumer) { // Package-scoped for tests
         XStreamFactory factoryInstance = consumer.getFactory();
         PoolInstance pool = pools.computeIfAbsent(factoryInstance, k -> new PoolInstance(factoryInstance));
         return pool;
