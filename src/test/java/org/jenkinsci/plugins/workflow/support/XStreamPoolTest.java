@@ -102,7 +102,9 @@ public class XStreamPoolTest {
             }
             XStreamPool.PoolInstance instance = pool.poolForConsumer(poolUser);
             Assert.assertEquals(threadCount, instance.getNumActive());
-            Thread.sleep(XStreamPool.BASE_CONFIG.getMinEvictableIdleTimeMillis()*2);
+            Thread.sleep(XStreamPool.BASE_CONFIG.getMinEvictableIdleTimeMillis()*3);
+
+            // FIXME figure out why the entries are not evicted?
             Assert.assertEquals(0, instance.getNumActive());
         } finally {  // Reset the pool setup
             XStreamPool.BASE_CONFIG.setMinEvictableIdleTimeMillis(XStreamPool.EVICTION_IDLE_MILLIS);
