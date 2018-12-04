@@ -94,7 +94,7 @@ public class BulkFlowNodeStorage extends FlowNodeStorage {
                     try {
                         roughNodes = (HashMap<String, Tag>) (XSTREAM.fromXML(getStoreFile()));
                         if (LOGGER.isLoggable(Level.FINER)) {  // To use for diagnosing a class of problems where flownodes don't show up in storage
-                            LOGGER.log(Level.FINER, "Initialized BulkFlowNodeStorage with "+roughNodes.size()+"flownodes, path:"+storeFile.getAbsolutePath(), new IOException("Logging where storage initialized"));
+                            LOGGER.log(Level.FINER, "Loaded BulkFlowNodeStorage with "+roughNodes.size()+" flownodes, node store path:"+storeFile.getAbsolutePath(), new IOException("Logging where storage initialized"));
                         }
                     } catch (Exception ex) {
                        nodes = new HashMap<String, Tag>();
@@ -119,12 +119,15 @@ public class BulkFlowNodeStorage extends FlowNodeStorage {
                     nodes = roughNodes;
                 } else {
                     if (LOGGER.isLoggable(Level.FINE)) {  // To use for diagnosing a class of problems where flownodes don't show up in storage
-                        LOGGER.log(Level.FINE, "Initialized BulkFlowNodeStorage with empty flownodes, path:"+storeFile.getAbsolutePath(), new IOException("Logging where storage initialized"));
+                        LOGGER.log(Level.FINE, "Nonexistent nodes file, initialized BulkFlowNodeStorage with empty flownodes, file is:"+storeFile.getAbsolutePath(), new IOException("Logging where storage initialized"));
                     }
                     nodes = new HashMap<String, Tag>();
                 }
             } else {
                 IOUtils.mkdirs(dir);
+                if (LOGGER.isLoggable(Level.FINE)) {  // To use for diagnosing a class of problems where flownodes don't show up in storage
+                    LOGGER.log(Level.FINE, "Nonexistent nodes directory, initialized BulkFlowNodeStorage with empty flownodes, directory is:"+dir.getAbsolutePath(), new IOException("Logging where storage initialized"));
+                }
                 nodes = new HashMap<String, Tag>();
             }
         }
