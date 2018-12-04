@@ -45,6 +45,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * {@link FlowNodeStorage} implementation that stores all the {@link FlowNode}s together in one file for efficient bulk I/O
@@ -73,6 +75,8 @@ public class BulkFlowNodeStorage extends FlowNodeStorage {
         return new File(dir, "flowNodeStore.xml");
     }
 
+    private static final Logger LOGGER = Logger.getLogger(BulkFlowNodeStorage.class.getName());
+
     public BulkFlowNodeStorage(FlowExecution exec, File dir) {
         this.exec = exec;
         this.dir = dir;
@@ -89,6 +93,9 @@ public class BulkFlowNodeStorage extends FlowNodeStorage {
                     HashMap<String, Tag> roughNodes = null;
                     try {
                         roughNodes = (HashMap<String, Tag>) (XSTREAM.fromXML(getStoreFile()));
+                        if (LOGGER.isLoggable(Level.FINER)) {  // To use for diagnosing a class of problems where flownodes don't show up in storage
+                            LOGGER.log(Level.FINER, "Initialized BulkFlowNodeStorage with "+roughNodes.size()+"flownodes, path:"+storeFile.getAbsolutePath(), new IOException("Logging where storage initialized"));
+                        }
                     } catch (Exception ex) {
                        nodes = new HashMap<String, Tag>();
                        throw new IOException("Failed to read nodes", ex);
@@ -111,6 +118,9 @@ public class BulkFlowNodeStorage extends FlowNodeStorage {
                     }
                     nodes = roughNodes;
                 } else {
+                    if (LOGGER.isLoggable(Level.FINE)) {  // To use for diagnosing a class of problems where flownodes don't show up in storage
+                        LOGGER.log(Level.FINE, "Initialized BulkFlowNodeStorage with empty flownodes, path:"+storeFile.getAbsolutePath(), new IOException("Logging where storage initialized"));
+                    }
                     nodes = new HashMap<String, Tag>();
                 }
             } else {
