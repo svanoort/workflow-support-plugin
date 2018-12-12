@@ -47,6 +47,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 /**
  * {@link FlowNodeStorage} implementation that stores all the {@link FlowNode}s together in one file for efficient bulk I/O
@@ -95,6 +96,7 @@ public class BulkFlowNodeStorage extends FlowNodeStorage {
                         roughNodes = (HashMap<String, Tag>) (XSTREAM.fromXML(getStoreFile()));
                         if (LOGGER.isLoggable(Level.FINER)) {  // To use for diagnosing a class of problems where flownodes don't show up in storage
                             LOGGER.log(Level.FINER, "Loaded BulkFlowNodeStorage with "+roughNodes.size()+" flownodes, node store path:"+storeFile.getAbsolutePath(), new IOException("Logging where storage initialized"));
+                            LOGGER.log(Level.FINER, "Loaded FlowNode IDs: "+roughNodes.keySet().stream().sorted().collect(Collectors.joining(",")));
                         }
                     } catch (Exception ex) {
                        nodes = new HashMap<String, Tag>();
