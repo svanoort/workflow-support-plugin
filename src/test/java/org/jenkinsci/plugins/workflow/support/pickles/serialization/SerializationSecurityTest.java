@@ -56,15 +56,23 @@ public class SerializationSecurityTest {
         rr.then(r -> {
             WorkflowJob p = r.createProject(WorkflowJob.class, "p");
             p.setDefinition(new CpsFlowDefinition(
-                "class Hack {\n" +
+                /*"class Hack {\n" +
                 "  @NonCPS private void writeObject(ObjectOutputStream out) {\n" +
                 "    Jenkins.instance.systemMessage = 'oops'\n" +
                 "  }\n" +
                 "}\n" +
-                "def hack = new Hack()\n" +
-                "sleep 1\n" +
-                "echo(/should not still have $hack/)", true));
-            safe(r, p.scheduleBuild2(0).get());
+                "def hack = new Hack()\n" +*/
+                "sleep 5\n" +
+                "echo(/should not still have bob/)", false));
+            p.scheduleBuild2(0).waitForStart();
+//            safe(r, p.scheduleBuild2(0).get());
+            Thread.sleep(1000L);
+        });
+        rr.then(r-> {
+            WorkflowJob j = r.jenkins.getItemByFullName("p", WorkflowJob.class);
+            WorkflowRun run = j.getLastBuild();
+            Thread.sleep(5000L);
+            r.assertBuildStatusSuccess(run);
         });
     }
 
@@ -141,12 +149,16 @@ public class SerializationSecurityTest {
                 "  }\n" +
                 "}\n" +
                 "def hack = new Hack()\n" +
-                "semaphore 'wait'\n" +
+                "sleep 5\n"+
+//                "semaphore 'wait'\n" +
                 "echo(/should not still have $hack/)", true));
-            SemaphoreStep.waitForStart("wait/1", p.scheduleBuild2(0).waitForStart());
+            p.scheduleBuild2(0).waitForStart();
+            Thread.sleep(2000);
+//            SemaphoreStep.waitForStart("wait/1", );
         });
         rr.then(r -> {
-            SemaphoreStep.success("wait/1", null);
+            Thread.sleep(5000);
+//            SemaphoreStep.success("wait/1", null);
             safe(r, r.waitForCompletion(r.jenkins.getItemByFullName("p", WorkflowJob.class).getBuildByNumber(1)));
         });
     }
